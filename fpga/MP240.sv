@@ -117,23 +117,17 @@ pll pll
 	.outclk_1(CLK_VIDEO)   // 20 MHz (10 MHz pixel rate, 15 kHz-family timing)
 );
 
-/////////////////////   VIDEO — VHS static   ///////////////////
-// Noise generator and 15 kHz NTSC/PAL timing from Menu_MiSTer.
-
-localparam lfsr_n = 63;
+/////////////////////   VIDEO — timing only, black core video   ///////////////////
+// 15 kHz NTSC/PAL timing from Menu_MiSTer.  The core's own RGB is held BLACK:
+// the picture is the HPS framebuffer (ascal reads DDR when FB_EN=1), and the
+// app owns the full screen.  A tinted/animated backdrop, if wanted, is better
+// drawn by the app into the framebuffer than generated here in fabric — that
+// way it never competes with the app's pixels.
 
 wire PAL = status[2];
 
 reg   [9:0] hc;
 reg   [9:0] vc;
-reg   [9:0] vvc;
-
-reg  [lfsr_n:0] rnd_reg;
-wire [lfsr_n:0] rnd;
-
-wire  [5:0] rnd_c = {rnd_reg[0],rnd_reg[1],rnd_reg[2],rnd_reg[2],rnd_reg[2],rnd_reg[2]};
-
-lfsr #(lfsr_n) random(rnd);
 
 always @(posedge CLK_VIDEO) begin
 	if(forced_scandoubler) ce_pix <= 1;
@@ -142,17 +136,13 @@ always @(posedge CLK_VIDEO) begin
 	if(ce_pix) begin
 		if(hc == 637) begin
 			hc <= 0;
-			if(vc == (PAL ? (forced_scandoubler ? 623 : 311) : (forced_scandoubler ? 523 : 261))) begin
+			if(vc == (PAL ? (forced_scandoubler ? 623 : 311) : (forced_scandoubler ? 523 : 261)))
 				vc <= 0;
-				vvc <= vvc + 9'd6;
-			end else begin
+			else
 				vc <= vc + 1'd1;
-			end
 		end else begin
 			hc <= hc + 1'd1;
 		end
-
-		rnd_reg <= rnd;
 	end
 end
 
@@ -188,17 +178,11 @@ always @(posedge CLK_VIDEO) begin
 	if (hc == 590) HSync <= 0;
 end
 
-reg  [7:0] cos_out;
-wire [5:0] cos_g = cos_out[7:3]+6'd32;
-cos cos(vvc + {vc>>forced_scandoubler, 2'b00}, cos_out);
-
-wire [7:0] comp_v = (cos_g >= rnd_c) ? {cos_g - rnd_c, 2'b00} : 8'd0;
-
 assign VGA_DE  = ~(HBlank | VBlank);
 assign VGA_HS  = HSync;
 assign VGA_VS  = VSync;
-assign VGA_G   = comp_v;
-assign VGA_R   = comp_v;
-assign VGA_B   = comp_v;
+assign VGA_G   = 8'd0;
+assign VGA_R   = 8'd0;
+assign VGA_B   = 8'd0;
 
 endmodule
