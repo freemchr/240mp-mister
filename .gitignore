@@ -1,0 +1,29 @@
+# Build outputs
+build/
+*.o
+*.a
+*.rbf
+!dist/releases/*.rbf
+
+# Quartus junk (keep .qpf/.qsf/.sdc/.srf and sources)
+fpga/db/
+fpga/incremental_db/
+fpga/output_files/
+fpga/greybox_tmp/
+fpga/hc_output/
+fpga/*.qws
+fpga/*.rpt
+fpga/*.summary
+fpga/*.smsg
+fpga/*.pin
+fpga/*.sld
+fpga/*.jdi
+fpga/*.sof
+fpga/*.done
+fpga/c5_pin_model_dump.txt
+
+# Editor / OS
+.DS_Store
+*.swp
+.vscode/
+.idea/

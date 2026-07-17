@@ -1,0 +1,39 @@
+name: build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  # HPS app — canonical build: Debian Bullseye's cross gcc targets glibc 2.31,
+  # exactly matching the MiSTer Linux image.
+  app:
+    runs-on: ubuntu-latest
+    container: debian:bullseye
+    steps:
+      - name: Install toolchain
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            gcc-arm-linux-gnueabihf libc6-dev-armhf-cross make file ca-certificates
+      - uses: actions/checkout@v4
+      - name: Build
+        run: make -C app
+      - uses: actions/upload-artifact@v4
+        with:
+          name: hps-app
+          path: app/build/
+
+  # FPGA core (.rbf) — added in Phase 1: Quartus 17.0 via raetro/quartus docker.
+  # Placeholder so the workflow structure is settled now.
+  # rbf:
+  #   runs-on: ubuntu-latest
+  #   container: raetro/quartus:17.0
+  #   steps:
+  #     - uses: actions/checkout@v4
+  #     - run: quartus_sh --flow compile fpga/240MP.qpf
+  #     - uses: actions/upload-artifact@v4
+  #       with:
+  #         name: core-rbf
+  #         path: fpga/output_files/240MP.rbf
