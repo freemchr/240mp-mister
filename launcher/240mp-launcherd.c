@@ -5,17 +5,16 @@
  * /media/fat/linux/user-startup.sh).  Watches /tmp/CORENAME (written by
  * Main_MiSTer on every core change):
  *
- *   CORENAME == "240MP"  →  1. enable the Linux framebuffer scanout
+ *   CORENAME == "240MP"  →  1. clear the core's fabric framebuffer (it scans
+ *                              out DDR at 0x20000000, garbage after power-up)
  *                           2. exec the app (/media/fat/240mp/run.sh)
  *   CORENAME != "240MP"  →  SIGTERM the app if running
  *   app exits cleanly    →  return to the MiSTer menu (load menu.rbf)
  *
- * Framebuffer scanout: Main only displays the Linux console framebuffer
- * (buffer 0) when the "fb terminal" is active.  There is no /dev/MiSTer_cmd
- * command for it, but Main's global key handler toggles it on
- * Ctrl+Alt+F9 for any core (menu.cpp KEY_F9 handler, requires
- * cfg.fb_terminal=1 which is the default).  We synthesize that chord with a
- * short-lived uinput virtual keyboard — no Main_MiSTer modifications needed.
+ * The 240MP core owns its framebuffer in fabric (MISTER_FB), so no
+ * Main_MiSTer framebuffer-terminal state is involved.  (Historical note:
+ * v1 tried Main's Ctrl+Alt+F9 fb-terminal chord via uinput — it works on
+ * the menu core but never triggered on a custom core, hence the fabric fb.)
  *
  * Static-linked, no dependencies. GPL-3.0.
  */
@@ -29,18 +28,18 @@
 #include <errno.h>
 #include <signal.h>
 #include <time.h>
-#include <sys/ioctl.h>
+#include <sys/mman.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <sys/wait.h>
-#include <linux/uinput.h>
 
 #define CORENAME_FILE "/tmp/CORENAME"
 #define CORE_NAME     "240MP"
 #define APP_CMD       "/media/fat/240mp/run.sh"
 #define MISTER_CMD    "/dev/MiSTer_cmd"
 #define MENU_RBF      "/media/fat/menu.rbf"
-#define FB_SETUP_CMD  "fb_cmd1 8888 1 640 480"
+#define FB_BASE       0x20000000u        /* fabric framebuffer (MP240.sv FB_BASE) */
+#define FB_BYTES      (640u * 480u * 4u)
 
 static volatile sig_atomic_t g_running = 1;
 static void on_term(int sig) { (void)sig; g_running = 0; }
@@ -70,56 +69,34 @@ static void mister_cmd(const char *cmd)
     close(fd);
 }
 
-/* ---- uinput: synthesize Ctrl+Alt+F9 so Main enables the fb terminal ---- */
-
-static int emit(int fd, int type, int code, int value)
+static void logts(const char *fmt, const char *arg)
 {
-    struct input_event ev = {0};
-    ev.type = type;
-    ev.code = code;
-    ev.value = value;
-    return write(fd, &ev, sizeof ev) == sizeof ev ? 0 : -1;
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    fprintf(stderr, "[%5lld.%03ld] launcherd: ", (long long)ts.tv_sec, ts.tv_nsec / 1000000);
+    fprintf(stderr, fmt, arg);
+    fputc('\n', stderr);
 }
 
-static int inject_fb_terminal_chord(void)
+
+/* ---- clear the fabric framebuffer (uninitialized DDR = garbage) ------- */
+
+static void clear_framebuffer(void)
 {
-    int fd = open("/dev/uinput", O_WRONLY | O_NONBLOCK);
-    if (fd < 0) {
-        fprintf(stderr, "launcherd: open /dev/uinput: %s\n", strerror(errno));
-        return -1;
+    int dm = open("/dev/mem", O_RDWR | O_SYNC);
+    if (dm < 0) {
+        logts("open /dev/mem failed: %s", strerror(errno));
+        return;
     }
-
-    ioctl(fd, UI_SET_EVBIT, EV_KEY);
-    ioctl(fd, UI_SET_KEYBIT, KEY_LEFTCTRL);
-    ioctl(fd, UI_SET_KEYBIT, KEY_LEFTALT);
-    ioctl(fd, UI_SET_KEYBIT, KEY_F9);
-
-    struct uinput_user_dev ud = {0};
-    snprintf(ud.name, sizeof ud.name, "240mp-launcher-kbd");
-    ud.id.bustype = BUS_VIRTUAL;
-    ud.id.vendor = 0x0240; ud.id.product = 0x00F9; ud.id.version = 1;
-    if (write(fd, &ud, sizeof ud) != sizeof ud || ioctl(fd, UI_DEV_CREATE)) {
-        fprintf(stderr, "launcherd: uinput create failed: %s\n", strerror(errno));
-        close(fd);
-        return -1;
+    void *p = mmap(NULL, FB_BYTES, PROT_WRITE, MAP_SHARED, dm, FB_BASE);
+    close(dm);
+    if (p == MAP_FAILED) {
+        logts("mmap fb region failed: %s", strerror(errno));
+        return;
     }
-
-    /* Main hotplugs input devices; give it a moment to pick ours up. */
-    msleep(1200);
-
-    emit(fd, EV_KEY, KEY_LEFTCTRL, 1); emit(fd, EV_SYN, SYN_REPORT, 0);
-    emit(fd, EV_KEY, KEY_LEFTALT,  1); emit(fd, EV_SYN, SYN_REPORT, 0);
-    msleep(50);
-    emit(fd, EV_KEY, KEY_F9, 1);       emit(fd, EV_SYN, SYN_REPORT, 0);
-    msleep(50);
-    emit(fd, EV_KEY, KEY_F9, 0);       emit(fd, EV_SYN, SYN_REPORT, 0);
-    emit(fd, EV_KEY, KEY_LEFTALT,  0); emit(fd, EV_SYN, SYN_REPORT, 0);
-    emit(fd, EV_KEY, KEY_LEFTCTRL, 0); emit(fd, EV_SYN, SYN_REPORT, 0);
-
-    msleep(200);
-    ioctl(fd, UI_DEV_DESTROY);
-    close(fd);
-    return 0;
+    memset(p, 0, FB_BYTES);
+    munmap(p, FB_BYTES);
+    logts("framebuffer cleared%s", "");
 }
 
 /* ------------------------------- app control --------------------------- */
@@ -167,13 +144,10 @@ int main(void)
         int was_ours = strcmp(prev, CORE_NAME) == 0;
 
         if (is_ours && !was_ours) {
-            fprintf(stderr, "launcherd: %s core loaded\n", CORE_NAME);
-            msleep(800);                       /* let the core finish init */
-            inject_fb_terminal_chord();        /* console fb scanout on */
-            msleep(500);
-            mister_cmd(FB_SETUP_CMD);          /* accepted now fb is active */
-            msleep(200);
+            logts("%s core loaded", CORE_NAME);
+            clear_framebuffer();               /* ASAP: garbage → black */
             app = start_app();
+            logts("app started%s", "");
         }
         else if (!is_ours && was_ours) {
             fprintf(stderr, "launcherd: core changed to '%s', stopping app\n", core);

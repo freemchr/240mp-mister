@@ -64,6 +64,21 @@ assign BUTTONS = 0;
 assign VIDEO_ARX = 0;
 assign VIDEO_ARY = 0;
 
+/////////////////////  FABRIC-OWNED FRAMEBUFFER  ///////////////////
+// The core itself scans out a fixed DDR3 framebuffer (MISTER_FB / ascal),
+// independent of Main_MiSTer's fb-terminal state.  The HPS app writes
+// pixels directly via /dev/mem.  0x20000000 is the documented core
+// framebuffer region (Linux console fb lives above it at +32MB).
+// Format 5'b10110 = 32bpp, BGR bit set -> app writes little-endian
+// XRGB8888 words (0x00RRGGBB), same as the Phase 0 validated format.
+assign FB_EN          = 1;
+assign FB_FORMAT      = 5'b10110;
+assign FB_WIDTH       = 12'd640;
+assign FB_HEIGHT      = 12'd480;
+assign FB_BASE        = 32'h20000000;
+assign FB_STRIDE      = 14'd2560;
+assign FB_FORCE_BLANK = 0;
+
 assign CE_PIXEL = ce_pix;
 
 // Breathing activity LED (as in the menu core)

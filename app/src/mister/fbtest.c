@@ -12,8 +12,12 @@
  * overscan border, live fb info text, and a bouncing box (tearing check),
  * while playing a 440 Hz tone (pitch check: if the rate is wrong you'll hear it).
  *
- * Usage: fbtest [WxH] [--fmt 8888|565] [--rb 0|1] [--no-audio]
+ * Usage: fbtest [WxH] [--fmt 8888|565] [--rb 0|1] [--no-audio] [--devmem]
  *   defaults: 640x480 --fmt 8888 --rb 1  (matches Main's Linux-console fb setup)
+ *   --devmem: write the 240MP core's fabric-owned framebuffer directly
+ *             (mmap /dev/mem at 0x20000000, fixed 640x480 XRGB8888) instead of
+ *             /dev/fb0.  No Main_MiSTer fb-terminal state needed; /dev/fb0 is
+ *             opened only for the FBIO_WAITFORVSYNC ioctl.
  * Exit: ESC / q on keyboard, or SELECT+START style BTN_MODE on a pad; SIGINT ok.
  *
  * Static-linked, no dependencies. GPL-3.0.
@@ -306,19 +310,24 @@ static void draw_static_scene(struct surface *s)
 }
 
 /* ------------------------------------------------------------------ main -- */
+#define DEVMEM_FB_BASE 0x20000000u   /* 240MP core's fabric framebuffer */
+#define DEVMEM_FB_W    640
+#define DEVMEM_FB_H    480
+
 int main(int argc, char **argv)
 {
-    int req_w = 640, req_h = 480, rb = 1;
+    int req_w = 640, req_h = 480, rb = 1, devmem = 0;
     const char *fmt = "8888";
 
     for (int i = 1; i < argc; i++) {
         if (!strcmp(argv[i], "--no-audio")) g_audio_enabled = 0;
+        else if (!strcmp(argv[i], "--devmem")) devmem = 1;
         else if (!strcmp(argv[i], "--fmt") && i + 1 < argc) fmt = argv[++i];
         else if (!strcmp(argv[i], "--rb") && i + 1 < argc) rb = atoi(argv[++i]);
         else if (sscanf(argv[i], "%dx%d", &req_w, &req_h) == 2) { /* ok */ }
         else {
             fprintf(stderr,
-                "usage: %s [WxH] [--fmt 8888|565] [--rb 0|1] [--no-audio]\n",
+                "usage: %s [WxH] [--fmt 8888|565] [--rb 0|1] [--no-audio] [--devmem]\n",
                 argv[0]);
             return 2;
         }
@@ -331,30 +340,52 @@ int main(int argc, char **argv)
     signal(SIGINT, on_sigint);
     signal(SIGTERM, on_sigint);
 
-    /* 1. ask Main to set the scaler framebuffer */
-    char cmd[64];
-    snprintf(cmd, sizeof cmd, "fb_cmd1 %s %d %d %d", fmt, rb, req_w, req_h);
-    mister_cmd(cmd);
-    usleep(200 * 1000);                 /* let Main + kernel module settle */
-    print_fb_mode_param();
+    int fb = -1;                        /* fd used for FBIO_WAITFORVSYNC */
+    uint8_t *fbmem;
+    size_t map_len;
+    struct fb_var_screeninfo vi = {0};
+    struct fb_fix_screeninfo fi = {0};
 
-    /* 2. open + map /dev/fb0 with whatever geometry actually resulted */
-    int fb = open("/dev/fb0", O_RDWR);
-    if (fb < 0) { perror("open /dev/fb0"); return 1; }
-    struct fb_var_screeninfo vi;
-    struct fb_fix_screeninfo fi;
-    if (ioctl(fb, FBIOGET_VSCREENINFO, &vi) || ioctl(fb, FBIOGET_FSCREENINFO, &fi)) {
-        perror("fb ioctl"); return 1;
+    if (devmem) {
+        /* Fabric-owned framebuffer: fixed geometry, mapped via /dev/mem. */
+        vi.xres = DEVMEM_FB_W; vi.yres = DEVMEM_FB_H; vi.bits_per_pixel = 32;
+        fi.line_length = DEVMEM_FB_W * 4;
+        map_len = (size_t)fi.line_length * vi.yres;
+
+        int dm = open("/dev/mem", O_RDWR | O_SYNC);
+        if (dm < 0) { perror("open /dev/mem"); return 1; }
+        fbmem = mmap(NULL, map_len, PROT_READ | PROT_WRITE, MAP_SHARED,
+                     dm, DEVMEM_FB_BASE);
+        close(dm);
+        if (fbmem == MAP_FAILED) { perror("mmap /dev/mem"); return 1; }
+        printf("devmem fb: %ux%u @ 0x%08x stride=%u\n",
+               vi.xres, vi.yres, DEVMEM_FB_BASE, fi.line_length);
+
+        fb = open("/dev/fb0", O_RDWR);  /* vsync ioctl only; ok if absent */
+    } else {
+        /* 1. ask Main to set the scaler framebuffer */
+        char cmd[64];
+        snprintf(cmd, sizeof cmd, "fb_cmd1 %s %d %d %d", fmt, rb, req_w, req_h);
+        mister_cmd(cmd);
+        usleep(200 * 1000);             /* let Main + kernel module settle */
+        print_fb_mode_param();
+
+        /* 2. open + map /dev/fb0 with whatever geometry actually resulted */
+        fb = open("/dev/fb0", O_RDWR);
+        if (fb < 0) { perror("open /dev/fb0"); return 1; }
+        if (ioctl(fb, FBIOGET_VSCREENINFO, &vi) || ioctl(fb, FBIOGET_FSCREENINFO, &fi)) {
+            perror("fb ioctl"); return 1;
+        }
+        printf("fb0: %ux%u bpp=%u stride=%u smem=%u\n",
+               vi.xres, vi.yres, vi.bits_per_pixel, fi.line_length, fi.smem_len);
+        if (vi.bits_per_pixel != 32) {
+            fprintf(stderr, "error: expected 32bpp, got %u\n", vi.bits_per_pixel);
+            return 1;
+        }
+        map_len = (size_t)fi.line_length * vi.yres;
+        fbmem = mmap(NULL, map_len, PROT_READ | PROT_WRITE, MAP_SHARED, fb, 0);
+        if (fbmem == MAP_FAILED) { perror("mmap fb0"); return 1; }
     }
-    printf("fb0: %ux%u bpp=%u stride=%u smem=%u\n",
-           vi.xres, vi.yres, vi.bits_per_pixel, fi.line_length, fi.smem_len);
-    if (vi.bits_per_pixel != 32) {
-        fprintf(stderr, "error: expected 32bpp, got %u\n", vi.bits_per_pixel);
-        return 1;
-    }
-    size_t map_len = (size_t)fi.line_length * vi.yres;
-    uint8_t *fbmem = mmap(NULL, map_len, PROT_READ | PROT_WRITE, MAP_SHARED, fb, 0);
-    if (fbmem == MAP_FAILED) { perror("mmap fb0"); return 1; }
 
     /* 3. backbuffer + static scene */
     struct surface s = { .w = (int)vi.xres, .h = (int)vi.yres };
