@@ -29,14 +29,17 @@ jobs:
   # via the raetro/quartus Docker image built for MiSTer CI.  Internal Quartus
   # revision is "MP240" (revision names can't start with a digit); the shipped
   # core file is renamed to 240MP.rbf.
+  # NOTE: not `container:` — the Quartus image's glibc is too old to host
+  # GitHub's Node-based actions (checkout fails inside it).  Instead the job
+  # runs on the host and only the compile itself happens in docker.
   rbf:
     runs-on: ubuntu-latest
-    container: raetro/quartus:17.0
     steps:
       - uses: actions/checkout@v4
-      - name: Compile core
-        working-directory: fpga
-        run: quartus_sh --flow compile MP240.qpf
+      - name: Compile core (Quartus 17.0 in docker)
+        run: |
+          docker run --rm -v "$PWD/fpga:/build" raetro/quartus:17.0 \
+            quartus_sh --flow compile MP240.qpf
       - name: Rename rbf
         run: cp fpga/output_files/MP240.rbf 240MP.rbf
       - uses: actions/upload-artifact@v4
