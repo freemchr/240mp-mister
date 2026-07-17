@@ -38,7 +38,7 @@
 #define APP_CMD       "/media/fat/240mp/run.sh"
 #define MISTER_CMD    "/dev/MiSTer_cmd"
 #define MENU_RBF      "/media/fat/menu.rbf"
-#define FB_BASE       0x20000000u        /* fabric framebuffer (MP240.sv FB_BASE) */
+#define FB_BASE       0x21000000u        /* fabric framebuffer (MP240.sv FB_BASE) */
 #define FB_BYTES      (640u * 480u * 4u)
 
 static volatile sig_atomic_t g_running = 1;
