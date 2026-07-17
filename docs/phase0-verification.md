@@ -39,4 +39,25 @@ before starting Phase 1.
 
 ## Results
 
-_(pending first hardware run)_
+**2026-07-17 — PASS** (MiSTer "MiSTerCRT", image 250402, kernel 5.15.1-MiSTer, menu core)
+
+| Check | Result |
+|---|---|
+| Framebuffer path | ✅ Bars/ramp/pattern rendered on CRT |
+| `fb_cmd1` resize | ✅ 640×480 applied (`mode: 8888 1 640 480 2560`) — **but only when the console fb is active** (see finding below) |
+| Channel order | ✅ Bar order white→yellow→cyan→green→magenta→red→blue confirmed correct with `--rb 1` |
+| VSync pacing | ✅ Smooth animation, `VSYNC OK` (FBIO_WAITFORVSYNC works) |
+| Audio path | ✅ Steady test tone via /dev/MrAudio |
+| Input | ✅ evdev events received ("input: dev5 … down"), exit key worked |
+
+### Key finding — console-buffer scanout
+
+Writing to `/dev/fb0` is only **visible** when Main_MiSTer is scanning out the Linux
+console buffer (fb buffer 0). On the idle menu core, Main displays the wallpaper
+buffers instead, so a background-launched app draws to invisible memory. Running via
+the **Scripts menu** activates the console buffer and everything shows.
+
+**Implication for Phase 1**: the launcher must ensure console scanout when our core
+loads (the Scripts path proves Main can do it; find the equivalent trigger — e.g. the
+script-launch mechanism or fb console enable via Main — rather than assuming fb0 is
+always visible).
