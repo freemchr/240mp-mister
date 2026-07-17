@@ -25,8 +25,14 @@ LDFLAGS := -static -lm -lpthread
 
 BUILD := build
 
+APP_SRC := src/app.c src/config.c src/ui/gfx.c src/mister/platform.c
+
 .PHONY: all clean
-all: $(BUILD)/fbtest $(BUILD)/240mp-launcherd
+all: $(BUILD)/240mp $(BUILD)/fbtest $(BUILD)/240mp-launcherd
+
+$(BUILD)/240mp: $(APP_SRC) | $(BUILD)
+	$(CC_CROSS) $(CFLAGS) -o $@ $(APP_SRC) $(LDFLAGS)
+	@file $@ 2>/dev/null || true
 
 $(BUILD)/fbtest: src/mister/fbtest.c | $(BUILD)
 	$(CC_CROSS) $(CFLAGS) -o $@ $< $(LDFLAGS)
