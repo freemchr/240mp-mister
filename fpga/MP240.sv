@@ -69,18 +69,20 @@ assign VIDEO_ARY = 0;
 // independent of Main_MiSTer's fb-terminal state.  The HPS app writes
 // pixels directly via /dev/mem.
 //
-// Base address 0x21000000: ascal's OWN scaler working buffer occupies
-// RAMBASE 0x20000000 + 8MB (sys_top.v), and Main's Linux console/wallpaper
-// framebuffers live at 0x22000000+.  0x21000000 sits in the gap between —
-// inside the core framebuffer region (0x20000000-0x21FFFFFF) yet clear of
-// ascal's scratch, which otherwise corrupts the top of our image.
+// Base address 0x22000000 (Main's canonical HPS framebuffer address =
+// 0x20000000 + 32MB).  An on-device readback test proved the scaler's DDR
+// working region corrupts the top ~40% of any buffer placed at 0x20000000
+// AND 0x21000000 (they alias/overlap ascal's scratch identically), while
+// 0x22000000 stays intact — it's the region the framework reserves for the
+// HPS framebuffer and never overwrites unless the fb-terminal is active
+// (which this core never triggers).
 // Format 5'b10110 = 32bpp, BGR bit set -> app writes little-endian
 // XRGB8888 words (0x00RRGGBB), same as the Phase 0 validated format.
 assign FB_EN          = 1;
 assign FB_FORMAT      = 5'b10110;
 assign FB_WIDTH       = 12'd640;
 assign FB_HEIGHT      = 12'd480;
-assign FB_BASE        = 32'h21000000;
+assign FB_BASE        = 32'h22000000;
 assign FB_STRIDE      = 14'd2560;
 assign FB_FORCE_BLANK = 0;
 

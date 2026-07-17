@@ -310,7 +310,7 @@ static void draw_static_scene(struct surface *s)
 }
 
 /* ------------------------------------------------------------------ main -- */
-#define DEVMEM_FB_BASE 0x21000000u   /* 240MP core's fabric framebuffer (MP240.sv FB_BASE) */
+#define DEVMEM_FB_BASE 0x22000000u   /* 240MP core's fabric framebuffer (MP240.sv FB_BASE) */
 #define DEVMEM_FB_W    640
 #define DEVMEM_FB_H    480
 
