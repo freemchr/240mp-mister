@@ -6,6 +6,7 @@ build/
 !dist/releases/*.rbf
 
 # Quartus junk (keep .qpf/.qsf/.sdc/.srf and sources)
+fpga/build_id.v
 fpga/db/
 fpga/incremental_db/
 fpga/output_files/

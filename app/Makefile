@@ -26,9 +26,13 @@ LDFLAGS := -static -lm -lpthread
 BUILD := build
 
 .PHONY: all clean
-all: $(BUILD)/fbtest
+all: $(BUILD)/fbtest $(BUILD)/240mp-launcherd
 
 $(BUILD)/fbtest: src/mister/fbtest.c | $(BUILD)
+	$(CC_CROSS) $(CFLAGS) -o $@ $< $(LDFLAGS)
+	@file $@ 2>/dev/null || true
+
+$(BUILD)/240mp-launcherd: ../launcher/240mp-launcherd.c | $(BUILD)
 	$(CC_CROSS) $(CFLAGS) -o $@ $< $(LDFLAGS)
 	@file $@ 2>/dev/null || true
 
